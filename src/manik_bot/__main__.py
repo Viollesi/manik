@@ -1,4 +1,4 @@
-"""Compatibility entry point for local project checks."""
+"""Application command-line entry point."""
 
 from manik_bot import __version__
 
@@ -10,3 +10,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
