@@ -1,13 +1,6 @@
-"""Application command-line entry point."""
+"""Application module entry point."""
 
-from manik_bot import __version__
-
-
-def main() -> None:
-    """Print the current application version."""
-    print(f"Manik Bot {__version__}")
-
+from manik_bot.cli import main
 
 if __name__ == "__main__":
-    main()
-
+    raise SystemExit(main())
