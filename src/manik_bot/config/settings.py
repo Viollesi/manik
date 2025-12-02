@@ -63,6 +63,15 @@ class Settings(BaseSettings):
         return tuple(int(item.strip()) for item in self.admin_ids.split(",") if item)
 
 
+
+class DatabaseSettings(BaseSettings):
+    """Database settings used by migrations and session helpers."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+    database_url: str = Field(alias="DATABASE_URL")
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Load application settings or raise a readable configuration error."""
@@ -71,6 +80,18 @@ def get_settings() -> Settings:
     except ValidationError as error:
         details = "; ".join(_format_settings_error(item) for item in error.errors())
         raise SettingsError(f"Ошибка конфигурации: {details}") from error
+
+
+
+@lru_cache
+def get_database_url() -> str:
+    """Load database URL without requiring Telegram bot settings."""
+    try:
+        return DatabaseSettings().database_url  # type: ignore[call-arg]
+    except ValidationError as error:
+        details = "; ".join(_format_settings_error(item) for item in error.errors())
+        raise SettingsError(f"Ошибка конфигурации БД: {details}") from error
+
 
 
 def _format_settings_error(error: Any) -> str:
