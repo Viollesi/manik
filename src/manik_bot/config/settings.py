@@ -94,6 +94,9 @@ def get_database_url() -> str:
 
 
 
+
+
+
 def _format_settings_error(error: Any) -> str:
     """Format Pydantic settings error in Russian."""
     location = error.get("loc", ())

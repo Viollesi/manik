@@ -59,6 +59,16 @@ async def handle_unknown_message(message: Message) -> None:
         await handle_help(message)
         return
 
+
+
+    if text in {"Расписание", "Записи"} and not _is_admin(message):
+        await message.answer(
+            "Этот раздел доступен только мастеру.",
+            reply_markup=get_client_menu(),
+        )
+        return
+
+
     if text in {"Услуги", "Моя запись", "Расписание", "Записи"}:
         await message.answer(
             "Этот раздел будет добавлен в следующем этапе.",
