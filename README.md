@@ -26,3 +26,30 @@ mypy
 Скопируйте `.env.example` в `.env` и заполните значения перед запуском будущего
 бота.
 
+```bash
+cp .env.example .env
+```
+
+## Запуск через Docker Compose
+
+Соберите и запустите инфраструктуру:
+
+```bash
+docker compose up --build
+```
+
+Команда поднимает контейнер приложения, PostgreSQL и Redis. На текущем этапе
+приложение запускает только placeholder-entrypoint и завершает работу без
+подключения к Telegram, базе данных или Redis.
+
+Остановить контейнеры можно так:
+
+```bash
+docker compose down
+```
+
+Если нужно удалить сохраненные данные PostgreSQL и Redis:
+
+```bash
+docker compose down -v
+```
