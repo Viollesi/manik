@@ -5,6 +5,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
+from aiogram.filters import BaseFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
@@ -20,6 +21,17 @@ from manik_bot.config import get_settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session
 
 router = Router()
+
+
+class AdminFilter(BaseFilter):
+    """Allow only admin users to pass into admin handlers."""
+
+    async def __call__(self, message: Message) -> bool:
+        """Check admin access for message author."""
+        return _is_admin(message)
+
+
+router.message.filter(AdminFilter())
 
 
 class AddService(StatesGroup):
@@ -119,12 +131,15 @@ async def handle_admin_back(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "Услуги")
 async def handle_services_menu(message: Message) -> None:
     """Show admin services menu."""
+
     if not _is_admin(message):
         await message.answer(
             "Раздел услуг будет добавлен в следующем этапе.",
             reply_markup=get_client_menu(),
         )
         return
+
+
     await message.answer("Управление услугами.", reply_markup=get_admin_services_menu())
 
 
