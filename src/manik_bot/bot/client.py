@@ -9,7 +9,17 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
+
 from manik_bot.bot.keyboards import get_booking_confirm_menu, get_client_menu
+
+from manik_bot.bot.keyboards import (
+    get_appointment_actions_menu,
+    get_booking_confirm_menu,
+    get_cancel_appointment_menu,
+    get_client_menu,
+    get_reschedule_confirm_menu,
+)
+
 from manik_bot.config import get_settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session
 
@@ -22,6 +32,22 @@ class Booking(StatesGroup):
     service_id = State()
     slot_id = State()
     confirm = State()
+
+
+
+
+class CancelAppointment(StatesGroup):
+    """FSM states for client appointment cancellation."""
+
+    confirm = State()
+
+
+class RescheduleAppointment(StatesGroup):
+    """FSM states for client appointment rescheduling."""
+
+    slot_id = State()
+    confirm = State()
+
 
 
 def parse_positive_int(value: str, error_message: str) -> int:
@@ -62,6 +88,24 @@ def format_booking_confirmation(service: Service, slot: TimeSlot) -> str:
     )
 
 
+
+
+def format_active_appointment(
+    appointment: Appointment,
+    service: Service,
+    slot: TimeSlot,
+) -> str:
+    """Format active appointment details for client."""
+    return (
+        "Ваша активная запись:\n\n"
+        f"Услуга: {service.title}\n"
+        f"Цена: {service.price} руб.\n"
+        f"Время: {format_client_slot(slot).split(': ', maxsplit=1)[1]}\n"
+        f"Номер записи: #{appointment.id}"
+    )
+
+
+
 def _client_name(message: Message) -> str:
     """Return readable client name from Telegram message."""
     if message.from_user is None:
@@ -74,6 +118,29 @@ def _client_username(message: Message) -> str | None:
     if message.from_user is None:
         return None
     return message.from_user.username
+
+
+async def _get_active_appointment(
+    client_telegram_id: int,
+) -> tuple[Appointment, Service, TimeSlot] | None:
+    """Return active appointment with service and slot for client."""
+    async for session in get_session():
+        appointment = await session.scalar(
+            select(Appointment).where(
+                Appointment.client_telegram_id == client_telegram_id,
+                Appointment.status == "active",
+            ),
+        )
+        if appointment is None:
+            return None
+
+        service = await session.get(Service, appointment.service_id)
+        slot = await session.get(TimeSlot, appointment.time_slot_id)
+        if service is None or slot is None:
+            return None
+
+        return appointment, service, slot
+    return None
 
 
 @router.message(F.text == "Услуги")
@@ -276,6 +343,236 @@ async def _notify_admins(
         f"Услуга: {service_title}\n"
         f"Время: {slot_start.strftime('%d.%m.%Y %H:%M')}"
     )
+    if message.bot is None:
+        return
+    for admin_id in get_settings().admin_id_values:
+        await message.bot.send_message(admin_id, text)
+
+
+
+@router.message(F.text == "Назад")
+async def handle_client_back(message: Message, state: FSMContext) -> None:
+    """Return client to the main menu."""
+    await state.clear()
+    await message.answer("Главное меню.", reply_markup=get_client_menu())
+
+
+@router.message(F.text == "Моя запись")
+async def show_my_appointment(message: Message, state: FSMContext) -> None:
+    """Show current active appointment."""
+    await state.clear()
+    if message.from_user is None:
+        await message.answer("Не удалось определить клиента.")
+        return
+
+    result = await _get_active_appointment(message.from_user.id)
+    if result is None:
+        await message.answer(
+            "У вас нет активной записи.",
+            reply_markup=get_client_menu(),
+        )
+        return
+
+    appointment, service, slot = result
+    await message.answer(
+        format_active_appointment(appointment, service, slot),
+        reply_markup=get_appointment_actions_menu(),
+    )
+
+
+@router.message(F.text == "Отменить мою запись")
+async def start_cancel_appointment(message: Message, state: FSMContext) -> None:
+    """Ask client to confirm appointment cancellation."""
+    if message.from_user is None:
+        await message.answer("Не удалось определить клиента.")
+        return
+
+    result = await _get_active_appointment(message.from_user.id)
+    if result is None:
+        await message.answer(
+            "У вас нет активной записи.",
+            reply_markup=get_client_menu(),
+        )
+        return
+
+    await state.set_state(CancelAppointment.confirm)
+    await message.answer(
+        "Вы уверены, что хотите отменить запись?",
+        reply_markup=get_cancel_appointment_menu(),
+    )
+
+
+@router.message(CancelAppointment.confirm)
+async def confirm_cancel_appointment(message: Message, state: FSMContext) -> None:
+    """Cancel active appointment after confirmation."""
+    if message.text != "Да, отменить запись":
+        await message.answer("Нажмите «Да, отменить запись» или «Назад».")
+        return
+    if message.from_user is None:
+        await message.answer("Не удалось определить клиента.")
+        return
+
+    async for session in get_session():
+        appointment = await session.scalar(
+            select(Appointment).where(
+                Appointment.client_telegram_id == message.from_user.id,
+                Appointment.status == "active",
+            ),
+        )
+        if appointment is None:
+            await state.clear()
+            await message.answer(
+                "У вас нет активной записи.",
+                reply_markup=get_client_menu(),
+            )
+            return
+
+        service = await session.get(Service, appointment.service_id)
+        slot = await session.get(TimeSlot, appointment.time_slot_id)
+        appointment.status = "cancelled"
+        if slot is not None:
+            slot.is_available = True
+            slot_start = slot.start_at
+        else:
+            slot_start = None
+        service_title = service.title if service is not None else "услуга не найдена"
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Запись отменена.", reply_markup=get_client_menu())
+    slot_time = slot_start.strftime("%d.%m.%Y %H:%M") if slot_start else "не найдено"
+    await _notify_admins_text(
+        message,
+        "Клиент отменил запись.\n\n"
+        f"Клиент: {_client_name(message)}\n"
+        f"Услуга: {service_title}\n"
+        f"Время: {slot_time}",
+    )
+
+
+@router.message(F.text == "Перенести запись")
+async def start_reschedule_appointment(message: Message, state: FSMContext) -> None:
+    """Show free slots and ask client to choose a new one."""
+    if message.from_user is None:
+        await message.answer("Не удалось определить клиента.")
+        return
+
+    result = await _get_active_appointment(message.from_user.id)
+    if result is None:
+        await message.answer(
+            "У вас нет активной записи.",
+            reply_markup=get_client_menu(),
+        )
+        return
+
+    async for session in get_session():
+        slots = list(
+            (
+                await session.scalars(
+                    select(TimeSlot)
+                    .where(TimeSlot.is_available.is_(True))
+                    .order_by(TimeSlot.start_at),
+                )
+            ).all(),
+        )
+
+    if not slots:
+        await message.answer(
+            "Пока нет свободного времени для переноса.",
+            reply_markup=get_appointment_actions_menu(),
+        )
+        return
+
+    await state.set_state(RescheduleAppointment.slot_id)
+    await message.answer(
+        "Выберите новое время и отправьте id слота:\n\n"
+        + "\n".join(format_client_slot(slot) for slot in slots),
+    )
+
+
+@router.message(RescheduleAppointment.slot_id)
+async def choose_reschedule_slot(message: Message, state: FSMContext) -> None:
+    """Save new slot for appointment reschedule."""
+    try:
+        slot_id = parse_positive_int(
+            message.text or "",
+            "Id слота должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        slot = await session.get(TimeSlot, slot_id)
+        if slot is None or not slot.is_available:
+            await message.answer("Свободный слот с таким id не найден.")
+            return
+        slot_text = format_client_slot(slot).split(": ", maxsplit=1)[1]
+
+    await state.update_data(slot_id=slot_id)
+    await state.set_state(RescheduleAppointment.confirm)
+    await message.answer(
+        f"Перенести запись на {slot_text}?",
+        reply_markup=get_reschedule_confirm_menu(),
+    )
+
+
+@router.message(RescheduleAppointment.confirm)
+async def confirm_reschedule_appointment(message: Message, state: FSMContext) -> None:
+    """Move active appointment to a new free slot."""
+    if message.text != "Подтвердить перенос":
+        await message.answer("Нажмите «Подтвердить перенос» или «Назад».")
+        return
+    if message.from_user is None:
+        await message.answer("Не удалось определить клиента.")
+        return
+
+    data = await state.get_data()
+    new_slot_id = int(data["slot_id"])
+
+    async for session in get_session():
+        appointment = await session.scalar(
+            select(Appointment).where(
+                Appointment.client_telegram_id == message.from_user.id,
+                Appointment.status == "active",
+            ),
+        )
+        if appointment is None:
+            await state.clear()
+            await message.answer(
+                "У вас нет активной записи.",
+                reply_markup=get_client_menu(),
+            )
+            return
+
+        old_slot = await session.get(TimeSlot, appointment.time_slot_id)
+        new_slot = await session.get(TimeSlot, new_slot_id)
+        service = await session.get(Service, appointment.service_id)
+        if new_slot is None or not new_slot.is_available:
+            await message.answer("Свободный слот с таким id не найден.")
+            return
+
+        if old_slot is not None:
+            old_slot.is_available = True
+        new_slot.is_available = False
+        appointment.time_slot_id = new_slot.id
+        service_title = service.title if service is not None else "услуга не найдена"
+        new_slot_start = new_slot.start_at
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Запись перенесена.", reply_markup=get_client_menu())
+    await _notify_admins_text(
+        message,
+        "Клиент перенес запись.\n\n"
+        f"Клиент: {_client_name(message)}\n"
+        f"Услуга: {service_title}\n"
+        f"Новое время: {new_slot_start.strftime('%d.%m.%Y %H:%M')}",
+    )
+
+
+async def _notify_admins_text(message: Message, text: str) -> None:
+    """Send text notification to all admins."""
     if message.bot is None:
         return
     for admin_id in get_settings().admin_id_values:

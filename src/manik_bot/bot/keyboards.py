@@ -63,3 +63,36 @@ def get_booking_confirm_menu() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+def get_appointment_actions_menu() -> ReplyKeyboardMarkup:
+    """Build active appointment actions menu."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Перенести запись")],
+            [KeyboardButton(text="Отменить мою запись")],
+            [KeyboardButton(text="Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def get_cancel_appointment_menu() -> ReplyKeyboardMarkup:
+    """Build appointment cancellation confirmation menu."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Да, отменить запись")],
+            [KeyboardButton(text="Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def get_reschedule_confirm_menu() -> ReplyKeyboardMarkup:
+    """Build appointment reschedule confirmation menu."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Подтвердить перенос")],
+            [KeyboardButton(text="Назад")],
+        ],
+        resize_keyboard=True,
+    )

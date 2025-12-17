@@ -5,12 +5,20 @@ from datetime import datetime
 import pytest
 
 from manik_bot.bot.client import (
+
+
+    format_active_appointment,
+
     format_booking_confirmation,
     format_client_service,
     format_client_slot,
     parse_positive_int,
 )
+
 from manik_bot.db import Service, TimeSlot
+
+from manik_bot.db import Appointment, Service, TimeSlot
+
 
 
 def test_parse_positive_int() -> None:
@@ -71,3 +79,25 @@ def test_format_booking_confirmation() -> None:
     assert "Проверьте запись" in text
     assert "Маникюр" in text
     assert "27.05.2026 15:00-16:30" in text
+
+
+def test_format_active_appointment() -> None:
+    """Check active appointment formatting."""
+    appointment = Appointment(id=5, client_telegram_id=123, client_name="Анна")
+    service = Service(
+        id=1,
+        title="Маникюр",
+        description="Классический",
+        price=1500,
+        duration_minutes=90,
+    )
+    slot = TimeSlot(
+        id=2,
+        start_at=datetime(2026, 5, 27, 15, 0),
+        end_at=datetime(2026, 5, 27, 16, 30),
+    )
+
+    text = format_active_appointment(appointment, service, slot)
+
+    assert "Ваша активная запись" in text
+    assert "Номер записи: #5" in text
