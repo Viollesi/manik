@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-manik-bot = "manik_bot.__main__:main"
+manik-bot = "manik_bot.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
