@@ -5,20 +5,13 @@ from datetime import datetime
 import pytest
 
 from manik_bot.bot.client import (
-
-
     format_active_appointment,
-
     format_booking_confirmation,
     format_client_service,
     format_client_slot,
     parse_positive_int,
 )
-
-from manik_bot.db import Service, TimeSlot
-
 from manik_bot.db import Appointment, Service, TimeSlot
-
 
 
 def test_parse_positive_int() -> None:

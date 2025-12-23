@@ -12,6 +12,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from manik_bot.bot.keyboards import (
+    get_admin_appointments_menu,
     get_admin_menu,
     get_admin_schedule_menu,
     get_admin_services_menu,
@@ -62,6 +63,21 @@ class CloseSlot(StatesGroup):
     slot_id = State()
 
 
+
+class CancelClientAppointment(StatesGroup):
+    """FSM state for admin appointment cancellation."""
+
+    appointment_id = State()
+
+
+class RescheduleClientAppointment(StatesGroup):
+    """FSM states for admin appointment rescheduling."""
+
+    appointment_id = State()
+    slot_id = State()
+
+
+
 def parse_positive_int(value: str, error_message: str) -> int:
     """Parse a positive integer from admin input."""
     try:
@@ -100,6 +116,48 @@ def format_slot(slot: TimeSlot) -> str:
     return f"#{slot.id}: {start}-{end}"
 
 
+def format_client_info(appointment: Appointment) -> str:
+    """Format appointment client info for admin messages."""
+    username = (
+        f"@{appointment.client_username}"
+        if appointment.client_username
+        else "без username"
+    )
+    return f"{appointment.client_name} ({username})"
+
+
+def format_admin_appointment(
+    appointment: Appointment,
+    service: Service,
+    slot: TimeSlot,
+) -> str:
+    """Format active appointment for admin list."""
+    return (
+        f"#{appointment.id}: {format_client_info(appointment)}\n"
+        f"Услуга: {service.title}\n"
+        f"Время: {format_slot(slot).split(': ', maxsplit=1)[1]}"
+    )
+
+
+def format_client_cancel_notice(service_title: str, slot: TimeSlot) -> str:
+    """Format cancellation notice for client."""
+    return (
+        "Мастер отменил вашу запись.\n\n"
+        f"Услуга: {service_title}\n"
+        f"Время: {format_slot(slot).split(': ', maxsplit=1)[1]}"
+    )
+
+
+def format_client_reschedule_notice(service_title: str, slot: TimeSlot) -> str:
+    """Format reschedule notice for client."""
+    return (
+        "Мастер перенес вашу запись.\n\n"
+        f"Услуга: {service_title}\n"
+        f"Новое время: {format_slot(slot).split(': ', maxsplit=1)[1]}"
+    )
+
+
+
 def _is_admin(message: Message) -> bool:
     """Check whether message author is an admin."""
     return (
@@ -132,12 +190,14 @@ async def handle_admin_back(message: Message, state: FSMContext) -> None:
 async def handle_services_menu(message: Message) -> None:
     """Show admin services menu."""
 
+
     if not _is_admin(message):
         await message.answer(
             "Раздел услуг будет добавлен в следующем этапе.",
             reply_markup=get_client_menu(),
         )
         return
+
 
 
     await message.answer("Управление услугами.", reply_markup=get_admin_services_menu())
@@ -151,6 +211,16 @@ async def handle_schedule_menu(message: Message) -> None:
     await message.answer(
         "Управление расписанием.",
         reply_markup=get_admin_schedule_menu(),
+    )
+
+
+
+@router.message(F.text == "Записи")
+async def handle_appointments_menu(message: Message) -> None:
+    """Show admin appointments menu."""
+    await message.answer(
+        "Управление записями.",
+        reply_markup=get_admin_appointments_menu(),
     )
 
 
@@ -398,3 +468,193 @@ async def close_slot(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer("Слот закрыт.", reply_markup=get_admin_schedule_menu())
+
+
+@router.message(F.text == "Активные записи")
+async def list_active_appointments(message: Message) -> None:
+    """Show active appointments."""
+    async for session in get_session():
+        appointments = list(
+            (
+                await session.scalars(
+                    select(Appointment)
+                    .where(Appointment.status == "active")
+                    .order_by(Appointment.id),
+                )
+            ).all(),
+        )
+        lines: list[str] = []
+        for appointment in appointments:
+            service = await session.get(Service, appointment.service_id)
+            slot = await session.get(TimeSlot, appointment.time_slot_id)
+            if service is not None and slot is not None:
+                lines.append(format_admin_appointment(appointment, service, slot))
+
+    if not lines:
+        await message.answer(
+            "Активных записей пока нет.",
+            reply_markup=get_admin_appointments_menu(),
+        )
+        return
+
+    await message.answer(
+        "\n\n".join(lines),
+        reply_markup=get_admin_appointments_menu(),
+    )
+
+
+@router.message(F.text == "Отменить запись")
+async def start_cancel_client_appointment(message: Message, state: FSMContext) -> None:
+    """Start client appointment cancellation by admin."""
+    await state.set_state(CancelClientAppointment.appointment_id)
+    await message.answer("Введите id записи, которую нужно отменить.")
+
+
+@router.message(CancelClientAppointment.appointment_id)
+async def cancel_client_appointment(message: Message, state: FSMContext) -> None:
+    """Cancel client appointment by id."""
+    try:
+        appointment_id = parse_positive_int(
+            message.text or "",
+            "Id записи должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        appointment = await session.get(Appointment, appointment_id)
+        if appointment is None or appointment.status != "active":
+            await message.answer("Активная запись с таким id не найдена.")
+            return
+
+        service = await session.get(Service, appointment.service_id)
+        slot = await session.get(TimeSlot, appointment.time_slot_id)
+        if service is None or slot is None:
+            await message.answer("Не удалось найти услугу или слот для записи.")
+            return
+
+        appointment.status = "cancelled"
+        slot.is_available = True
+        client_telegram_id = appointment.client_telegram_id
+        notice = format_client_cancel_notice(service.title, slot)
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Запись отменена.", reply_markup=get_admin_appointments_menu())
+    await _send_client_notice(message, client_telegram_id, notice)
+
+
+@router.message(F.text == "Перенести запись")
+async def start_reschedule_client_appointment(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Start client appointment rescheduling by admin."""
+    await state.set_state(RescheduleClientAppointment.appointment_id)
+    await message.answer("Введите id записи, которую нужно перенести.")
+
+
+@router.message(RescheduleClientAppointment.appointment_id)
+async def choose_appointment_for_reschedule(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Save appointment id and show free slots."""
+    try:
+        appointment_id = parse_positive_int(
+            message.text or "",
+            "Id записи должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        appointment = await session.get(Appointment, appointment_id)
+        if appointment is None or appointment.status != "active":
+            await message.answer("Активная запись с таким id не найдена.")
+            return
+
+        slots = list(
+            (
+                await session.scalars(
+                    select(TimeSlot)
+                    .where(TimeSlot.is_available.is_(True))
+                    .order_by(TimeSlot.start_at),
+                )
+            ).all(),
+        )
+
+    if not slots:
+        await state.clear()
+        await message.answer(
+            "Свободных слотов для переноса нет.",
+            reply_markup=get_admin_appointments_menu(),
+        )
+        return
+
+    await state.update_data(appointment_id=appointment_id)
+    await state.set_state(RescheduleClientAppointment.slot_id)
+    await message.answer(
+        "Выберите новый слот и отправьте его id:\n\n"
+        + "\n".join(format_slot(slot) for slot in slots),
+    )
+
+
+@router.message(RescheduleClientAppointment.slot_id)
+async def reschedule_client_appointment(message: Message, state: FSMContext) -> None:
+    """Move client appointment to another free slot."""
+    try:
+        slot_id = parse_positive_int(
+            message.text or "",
+            "Id слота должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    data = await state.get_data()
+    appointment_id = int(data["appointment_id"])
+
+    async for session in get_session():
+        appointment = await session.get(Appointment, appointment_id)
+        new_slot = await session.get(TimeSlot, slot_id)
+        if appointment is None or appointment.status != "active":
+            await message.answer("Активная запись с таким id не найдена.")
+            return
+        if new_slot is None or not new_slot.is_available:
+            await message.answer("Свободный слот с таким id не найден.")
+            return
+
+        old_slot = await session.get(TimeSlot, appointment.time_slot_id)
+        service = await session.get(Service, appointment.service_id)
+        if service is None:
+            await message.answer("Не удалось найти услугу для записи.")
+            return
+
+        if old_slot is not None:
+            old_slot.is_available = True
+        new_slot.is_available = False
+        appointment.time_slot_id = new_slot.id
+        client_telegram_id = appointment.client_telegram_id
+        notice = format_client_reschedule_notice(service.title, new_slot)
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        "Запись перенесена.",
+        reply_markup=get_admin_appointments_menu(),
+    )
+    await _send_client_notice(message, client_telegram_id, notice)
+
+
+async def _send_client_notice(
+    message: Message,
+    client_telegram_id: int,
+    text: str,
+) -> None:
+    """Send appointment notice to client."""
+    if message.bot is None:
+        return
+    await message.bot.send_message(client_telegram_id, text)

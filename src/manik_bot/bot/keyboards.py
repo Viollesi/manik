@@ -54,6 +54,21 @@ def get_admin_schedule_menu() -> ReplyKeyboardMarkup:
     )
 
 
+
+def get_admin_appointments_menu() -> ReplyKeyboardMarkup:
+    """Build the admin appointments menu."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Активные записи")],
+            [KeyboardButton(text="Отменить запись")],
+            [KeyboardButton(text="Перенести запись")],
+            [KeyboardButton(text="Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+
 def get_booking_confirm_menu() -> ReplyKeyboardMarkup:
     """Build booking confirmation menu."""
     return ReplyKeyboardMarkup(
@@ -63,6 +78,7 @@ def get_booking_confirm_menu() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
 
 def get_appointment_actions_menu() -> ReplyKeyboardMarkup:
     """Build active appointment actions menu."""

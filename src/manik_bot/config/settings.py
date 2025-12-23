@@ -63,7 +63,6 @@ class Settings(BaseSettings):
         return tuple(int(item.strip()) for item in self.admin_ids.split(",") if item)
 
 
-
 class DatabaseSettings(BaseSettings):
     """Database settings used by migrations and session helpers."""
 

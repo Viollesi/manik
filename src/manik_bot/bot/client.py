@@ -9,9 +9,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
 
-
-from manik_bot.bot.keyboards import get_booking_confirm_menu, get_client_menu
-
 from manik_bot.bot.keyboards import (
     get_appointment_actions_menu,
     get_booking_confirm_menu,
@@ -19,7 +16,6 @@ from manik_bot.bot.keyboards import (
     get_client_menu,
     get_reschedule_confirm_menu,
 )
-
 from manik_bot.config import get_settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session
 
@@ -34,8 +30,6 @@ class Booking(StatesGroup):
     confirm = State()
 
 
-
-
 class CancelAppointment(StatesGroup):
     """FSM states for client appointment cancellation."""
 
@@ -47,7 +41,6 @@ class RescheduleAppointment(StatesGroup):
 
     slot_id = State()
     confirm = State()
-
 
 
 def parse_positive_int(value: str, error_message: str) -> int:
@@ -86,7 +79,6 @@ def format_booking_confirmation(service: Service, slot: TimeSlot) -> str:
         f"Цена: {service.price} руб.\n"
         f"Время: {format_client_slot(slot).split(': ', maxsplit=1)[1]}"
     )
-
 
 
 
@@ -347,7 +339,6 @@ async def _notify_admins(
         return
     for admin_id in get_settings().admin_id_values:
         await message.bot.send_message(admin_id, text)
-
 
 
 @router.message(F.text == "Назад")

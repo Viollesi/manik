@@ -15,8 +15,6 @@ async def run_bot(settings: Settings) -> None:
     """Start Telegram polling."""
     bot = Bot(token=settings.bot_token)
     dispatcher = Dispatcher()
-
-
     dispatcher.include_router(admin_router)
     dispatcher.include_router(client_router)
     dispatcher.include_router(router)
