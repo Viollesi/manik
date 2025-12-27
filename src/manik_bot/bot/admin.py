@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from manik_bot.bot.keyboards import (
     get_admin_appointments_menu,
@@ -63,6 +64,7 @@ class CloseSlot(StatesGroup):
     slot_id = State()
 
 
+
 class CancelClientAppointment(StatesGroup):
     """FSM state for admin appointment cancellation."""
 
@@ -74,6 +76,7 @@ class RescheduleClientAppointment(StatesGroup):
 
     appointment_id = State()
     slot_id = State()
+
 
 
 def parse_positive_int(value: str, error_message: str) -> int:
@@ -155,6 +158,7 @@ def format_client_reschedule_notice(service_title: str, slot: TimeSlot) -> str:
     )
 
 
+
 def _is_admin(message: Message) -> bool:
     """Check whether message author is an admin."""
     return (
@@ -186,6 +190,17 @@ async def handle_admin_back(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "Услуги")
 async def handle_services_menu(message: Message) -> None:
     """Show admin services menu."""
+
+
+    if not _is_admin(message):
+        await message.answer(
+            "Раздел услуг будет добавлен в следующем этапе.",
+            reply_markup=get_client_menu(),
+        )
+        return
+
+
+
     await message.answer("Управление услугами.", reply_markup=get_admin_services_menu())
 
 
@@ -198,6 +213,7 @@ async def handle_schedule_menu(message: Message) -> None:
         "Управление расписанием.",
         reply_markup=get_admin_schedule_menu(),
     )
+
 
 
 @router.message(F.text == "Записи")
@@ -624,7 +640,16 @@ async def reschedule_client_appointment(message: Message, state: FSMContext) -> 
         appointment.time_slot_id = new_slot.id
         client_telegram_id = appointment.client_telegram_id
         notice = format_client_reschedule_notice(service.title, new_slot)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            await state.clear()
+            await message.answer(
+                "Этот слот уже заняли. Выберите другое время.",
+                reply_markup=get_admin_appointments_menu(),
+            )
+            return
 
     await state.clear()
     await message.answer(

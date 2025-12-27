@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     admin_ids: str = Field(default="", alias="ADMIN_IDS")
     database_url: str = Field(alias="DATABASE_URL")
-    redis_url: str = Field(alias="REDIS_URL")
     timezone: str = Field(default="Europe/Moscow", alias="TIMEZONE")
 
     @field_validator("bot_token")
@@ -81,6 +80,7 @@ def get_settings() -> Settings:
         raise SettingsError(f"Ошибка конфигурации: {details}") from error
 
 
+
 @lru_cache
 def get_database_url() -> str:
     """Load database URL without requiring Telegram bot settings."""
@@ -89,6 +89,7 @@ def get_database_url() -> str:
     except ValidationError as error:
         details = "; ".join(_format_settings_error(item) for item in error.errors())
         raise SettingsError(f"Ошибка конфигурации БД: {details}") from error
+
 
 
 def _format_settings_error(error: Any) -> str:

@@ -3,16 +3,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: sh -c "alembic upgrade head && manik-bot"
     environment:
       BOT_TOKEN: ${BOT_TOKEN:-replace_me}
       ADMIN_IDS: ${ADMIN_IDS:-123456789}
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://manik_bot:manik_bot@postgres:5432/manik_bot}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       TIMEZONE: ${TIMEZONE:-Europe/Moscow}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   postgres:
@@ -30,18 +28,5 @@ services:
       retries: 5
       start_period: 10s
 
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-
 volumes:
   postgres_data:
-  redis_data:

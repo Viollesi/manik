@@ -69,6 +69,7 @@ def test_format_slot() -> None:
     assert format_slot(slot) == "#2: 27.05.2026 15:00-16:30"
 
 
+
 def test_format_client_info() -> None:
     """Check client info formatting."""
     appointment = Appointment(

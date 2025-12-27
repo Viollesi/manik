@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from manik_bot.bot.keyboards import (
     get_appointment_actions_menu,
@@ -81,6 +82,7 @@ def format_booking_confirmation(service: Service, slot: TimeSlot) -> str:
     )
 
 
+
 def format_active_appointment(
     appointment: Appointment,
     service: Service,
@@ -94,6 +96,7 @@ def format_active_appointment(
         f"Время: {format_client_slot(slot).split(': ', maxsplit=1)[1]}\n"
         f"Номер записи: #{appointment.id}"
     )
+
 
 
 def _client_name(message: Message) -> str:
@@ -305,7 +308,16 @@ async def confirm_booking(message: Message, state: FSMContext) -> None:
         )
         slot.is_available = False
         session.add(appointment)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            await state.clear()
+            await message.answer(
+                "Этот слот уже заняли. Пожалуйста, выберите другое время.",
+                reply_markup=get_client_menu(),
+            )
+            return
 
     await state.clear()
     await message.answer(
@@ -547,7 +559,16 @@ async def confirm_reschedule_appointment(message: Message, state: FSMContext) ->
         appointment.time_slot_id = new_slot.id
         service_title = service.title if service is not None else "услуга не найдена"
         new_slot_start = new_slot.start_at
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            await state.clear()
+            await message.answer(
+                "Этот слот уже заняли. Пожалуйста, выберите другое время.",
+                reply_markup=get_client_menu(),
+            )
+            return
 
     await state.clear()
     await message.answer("Запись перенесена.", reply_markup=get_client_menu())
