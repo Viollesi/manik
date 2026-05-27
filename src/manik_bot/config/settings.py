@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     admin_ids: str = Field(default="", alias="ADMIN_IDS")
     database_url: str = Field(alias="DATABASE_URL")
-    redis_url: str = Field(alias="REDIS_URL")
     timezone: str = Field(default="Europe/Moscow", alias="TIMEZONE")
 
     @field_validator("bot_token")

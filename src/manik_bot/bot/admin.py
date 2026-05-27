@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from manik_bot.bot.keyboards import (
     get_admin_appointments_menu,
@@ -639,7 +640,16 @@ async def reschedule_client_appointment(message: Message, state: FSMContext) -> 
         appointment.time_slot_id = new_slot.id
         client_telegram_id = appointment.client_telegram_id
         notice = format_client_reschedule_notice(service.title, new_slot)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            await state.clear()
+            await message.answer(
+                "Этот слот уже заняли. Выберите другое время.",
+                reply_markup=get_admin_appointments_menu(),
+            )
+            return
 
     await state.clear()
     await message.answer(

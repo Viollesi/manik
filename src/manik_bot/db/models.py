@@ -2,7 +2,16 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -44,7 +53,7 @@ class TimeSlot(Base):
         nullable=False,
     )
 
-    appointment: Mapped["Appointment | None"] = relationship(back_populates="time_slot")
+    appointments: Mapped[list["Appointment"]] = relationship(back_populates="time_slot")
 
 
 class Appointment(Base):
@@ -60,7 +69,6 @@ class Appointment(Base):
     time_slot_id: Mapped[int] = mapped_column(
         ForeignKey("time_slots.id"),
         nullable=False,
-        unique=True,
     )
     status: Mapped[str] = mapped_column(String(20), default="active", nullable=False)
     reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -76,5 +84,15 @@ class Appointment(Base):
         nullable=False,
     )
 
+    __table_args__ = (
+        Index(
+            "ix_appointments_active_time_slot_id",
+            "time_slot_id",
+            unique=True,
+            postgresql_where=(status == "active"),
+            sqlite_where=(status == "active"),
+        ),
+    )
+
     service: Mapped[Service] = relationship(back_populates="appointments")
-    time_slot: Mapped[TimeSlot] = relationship(back_populates="appointment")
+    time_slot: Mapped[TimeSlot] = relationship(back_populates="appointments")
