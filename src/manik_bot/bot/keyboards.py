@@ -1,5 +1,7 @@
 """Reply keyboards for Telegram menus."""
 
+from collections.abc import Iterable
+
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
@@ -34,7 +36,11 @@ def get_admin_services_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="Добавить услугу"),
                 KeyboardButton(text="Список услуг"),
             ],
-            [KeyboardButton(text="Отключить услугу"), KeyboardButton(text="Назад")],
+            [
+                KeyboardButton(text="Изменить услугу"),
+                KeyboardButton(text="Отключить услугу"),
+            ],
+            [KeyboardButton(text="Включить услугу"), KeyboardButton(text="Назад")],
         ],
         resize_keyboard=True,
     )
@@ -48,6 +54,7 @@ def get_admin_schedule_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="Добавить слот"),
                 KeyboardButton(text="Свободные слоты"),
             ],
+            [KeyboardButton(text="Все слоты")],
             [KeyboardButton(text="Закрыть слот"), KeyboardButton(text="Назад")],
         ],
         resize_keyboard=True,
@@ -112,3 +119,23 @@ def get_reschedule_confirm_menu() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
     )
+
+
+def get_edit_service_menu() -> ReplyKeyboardMarkup:
+    """Build service edit field menu."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Название"), KeyboardButton(text="Описание")],
+            [KeyboardButton(text="Цена"), KeyboardButton(text="Длительность")],
+            [KeyboardButton(text="Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def get_id_choice_menu(ids: Iterable[int]) -> ReplyKeyboardMarkup:
+    """Build a keyboard with numeric choices."""
+    buttons = [KeyboardButton(text=str(item_id)) for item_id in ids]
+    rows = [buttons[index : index + 3] for index in range(0, len(buttons), 3)]
+    rows.append([KeyboardButton(text="Назад")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)

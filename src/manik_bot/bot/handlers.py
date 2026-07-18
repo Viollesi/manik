@@ -38,15 +38,14 @@ async def handle_help(message: Message) -> None:
     """Show a short help message."""
     if _is_admin(message):
         await message.answer(
-            "Вы в меню мастера. Скоро здесь появится управление услугами, "
-            "расписанием и записями.",
+            "Вы в меню мастера. Доступны услуги, расписание и активные записи.",
             reply_markup=get_admin_menu(),
         )
         return
 
     await message.answer(
-        "Вы в клиентском меню. Скоро здесь можно будет посмотреть услуги, "
-        "выбрать время и управлять своей записью.",
+        "Вы в клиентском меню. Можно посмотреть услуги, записаться, отменить "
+        "или перенести активную запись.",
         reply_markup=get_client_menu(),
     )
 
@@ -68,7 +67,7 @@ async def handle_unknown_message(message: Message) -> None:
 
     if text in {"Услуги", "Моя запись", "Расписание", "Записи"}:
         await message.answer(
-            "Этот раздел будет добавлен в следующем этапе.",
+            "Откройте раздел через меню.",
             reply_markup=get_admin_menu() if _is_admin(message) else get_client_menu(),
         )
         return

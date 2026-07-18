@@ -8,6 +8,7 @@ from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from manik_bot.bot.notifications import send_message_safely
 from manik_bot.config import Settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session_factory
 
@@ -77,16 +78,13 @@ async def _send_reminder(
     slot: TimeSlot,
 ) -> None:
     """Send one reminder and mark it as sent after successful delivery."""
-    try:
-        await bot.send_message(
-            appointment.client_telegram_id,
-            format_reminder_message(service, slot),
-        )
-    except Exception:
-        logger.exception(
-            "Не удалось отправить напоминание по записи #%s",
-            appointment.id,
-        )
+    is_sent = await send_message_safely(
+        bot,
+        appointment.client_telegram_id,
+        format_reminder_message(service, slot),
+    )
+    if not is_sent:
+        logger.error("Напоминание по записи #%s не отправлено", appointment.id)
         return
 
     appointment.reminder_sent = True

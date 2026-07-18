@@ -15,8 +15,10 @@ from manik_bot.bot.keyboards import (
     get_booking_confirm_menu,
     get_cancel_appointment_menu,
     get_client_menu,
+    get_id_choice_menu,
     get_reschedule_confirm_menu,
 )
+from manik_bot.bot.notifications import send_messages_safely
 from manik_bot.config import get_settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session
 
@@ -162,6 +164,7 @@ async def start_booking(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Выберите услугу и отправьте ее id:\n\n"
         + "\n\n".join(format_client_service(service) for service in services),
+        reply_markup=get_id_choice_menu(service.id for service in services),
     )
 
 
@@ -206,6 +209,7 @@ async def choose_service(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Выберите свободное время и отправьте id слота:\n\n"
         + "\n".join(format_client_slot(slot) for slot in slots),
+        reply_markup=get_id_choice_menu(slot.id for slot in slots),
     )
 
 
@@ -347,8 +351,7 @@ async def _notify_admins(
     )
     if message.bot is None:
         return
-    for admin_id in get_settings().admin_id_values:
-        await message.bot.send_message(admin_id, text)
+    await send_messages_safely(message.bot, get_settings().admin_id_values, text)
 
 
 @router.message(F.text == "Назад")
@@ -488,6 +491,7 @@ async def start_reschedule_appointment(message: Message, state: FSMContext) -> N
     await message.answer(
         "Выберите новое время и отправьте id слота:\n\n"
         + "\n".join(format_client_slot(slot) for slot in slots),
+        reply_markup=get_id_choice_menu(slot.id for slot in slots),
     )
 
 
@@ -585,5 +589,4 @@ async def _notify_admins_text(message: Message, text: str) -> None:
     """Send text notification to all admins."""
     if message.bot is None:
         return
-    for admin_id in get_settings().admin_id_values:
-        await message.bot.send_message(admin_id, text)
+    await send_messages_safely(message.bot, get_settings().admin_id_values, text)

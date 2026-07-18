@@ -18,7 +18,10 @@ from manik_bot.bot.keyboards import (
     get_admin_schedule_menu,
     get_admin_services_menu,
     get_client_menu,
+    get_edit_service_menu,
+    get_id_choice_menu,
 )
+from manik_bot.bot.notifications import send_message_safely
 from manik_bot.config import get_settings
 from manik_bot.db import Appointment, Service, TimeSlot, get_session
 
@@ -35,6 +38,9 @@ class AdminFilter(BaseFilter):
 
 router.message.filter(AdminFilter())
 
+MAX_SERVICE_PRICE = 100_000
+MAX_DURATION_MINUTES = 12 * 60
+
 
 class AddService(StatesGroup):
     """FSM states for adding a service."""
@@ -49,6 +55,20 @@ class DisableService(StatesGroup):
     """FSM state for disabling a service."""
 
     service_id = State()
+
+
+class EnableService(StatesGroup):
+    """FSM state for enabling a service."""
+
+    service_id = State()
+
+
+class EditService(StatesGroup):
+    """FSM states for editing a service."""
+
+    service_id = State()
+    field = State()
+    value = State()
 
 
 class AddSlot(StatesGroup):
@@ -90,6 +110,62 @@ def parse_positive_int(value: str, error_message: str) -> int:
     return result
 
 
+def parse_limited_positive_int(
+    value: str,
+    error_message: str,
+    max_value: int,
+) -> int:
+    """Parse a positive integer not greater than max value."""
+    result = parse_positive_int(value, error_message)
+    if result > max_value:
+        raise ValueError(error_message)
+    return result
+
+
+def parse_service_title(value: str) -> str:
+    """Parse non-empty service title."""
+    title = value.strip()
+    if not title:
+        raise ValueError("Название услуги не должно быть пустым.")
+    if len(title) > 120:
+        raise ValueError("Название услуги должно быть не длиннее 120 символов.")
+    return title
+
+
+def parse_edit_service_field(value: str) -> str:
+    """Parse service field selected for editing."""
+    fields = {
+        "Название": "title",
+        "Описание": "description",
+        "Цена": "price",
+        "Длительность": "duration_minutes",
+    }
+    try:
+        return fields[value.strip()]
+    except KeyError as error:
+        raise ValueError("Выберите поле из меню.") from error
+
+
+def _parse_service_edit_value(field: str, value: str) -> str | int:
+    if field == "title":
+        return parse_service_title(value)
+    if field == "description":
+        return value.strip()
+    if field == "price":
+        return parse_limited_positive_int(
+            value,
+            "Цена должна быть целым числом от 1 до 100000.",
+            MAX_SERVICE_PRICE,
+        )
+    if field == "duration_minutes":
+        return parse_limited_positive_int(
+            value,
+            "Длительность должна быть целым числом от 1 до 720.",
+            MAX_DURATION_MINUTES,
+        )
+    raise ValueError("Выберите поле из меню.")
+
+
 def parse_admin_datetime(value: str, timezone: str) -> datetime:
     """Parse admin date input in Russian-friendly format."""
     try:
@@ -97,6 +173,26 @@ def parse_admin_datetime(value: str, timezone: str) -> datetime:
     except ValueError as error:
         raise ValueError("Дата должна быть в формате ДД.ММ.ГГГГ ЧЧ:ММ.") from error
     return parsed.replace(tzinfo=ZoneInfo(timezone))
+
+
+def ensure_future_datetime(value: datetime, now: datetime) -> None:
+    """Check that datetime is in the future."""
+    if value.tzinfo is not None and now.tzinfo is None:
+        now = now.replace(tzinfo=value.tzinfo)
+    if value.tzinfo is None and now.tzinfo is not None:
+        value = value.replace(tzinfo=now.tzinfo)
+    if value <= now:
+        raise ValueError("Дата и время должны быть в будущем.")
+
+
+def slots_overlap(
+    first_start: datetime,
+    first_end: datetime,
+    second_start: datetime,
+    second_end: datetime,
+) -> bool:
+    """Check whether two time ranges overlap."""
+    return first_start < second_end and first_end > second_start
 
 
 def format_service(service: Service) -> str:
@@ -115,6 +211,12 @@ def format_slot(slot: TimeSlot) -> str:
     start = slot.start_at.strftime("%d.%m.%Y %H:%M")
     end = slot.end_at.strftime("%H:%M")
     return f"#{slot.id}: {start}-{end}"
+
+
+def format_slot_details(slot: TimeSlot) -> str:
+    """Format time slot with availability status."""
+    status = "свободен" if slot.is_available else "закрыт или занят"
+    return f"{format_slot(slot)} ({status})"
 
 
 def format_client_info(appointment: Appointment) -> str:
@@ -190,17 +292,6 @@ async def handle_admin_back(message: Message, state: FSMContext) -> None:
 @router.message(F.text == "Услуги")
 async def handle_services_menu(message: Message) -> None:
     """Show admin services menu."""
-
-
-    if not _is_admin(message):
-        await message.answer(
-            "Раздел услуг будет добавлен в следующем этапе.",
-            reply_markup=get_client_menu(),
-        )
-        return
-
-
-
     await message.answer("Управление услугами.", reply_markup=get_admin_services_menu())
 
 
@@ -237,7 +328,12 @@ async def start_add_service(message: Message, state: FSMContext) -> None:
 @router.message(AddService.title)
 async def add_service_title(message: Message, state: FSMContext) -> None:
     """Save service title."""
-    await state.update_data(title=(message.text or "").strip())
+    try:
+        title = parse_service_title(message.text or "")
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+    await state.update_data(title=title)
     await state.set_state(AddService.description)
     await message.answer("Введите описание услуги.")
 
@@ -254,7 +350,11 @@ async def add_service_description(message: Message, state: FSMContext) -> None:
 async def add_service_price(message: Message, state: FSMContext) -> None:
     """Save service price."""
     try:
-        price = parse_positive_int(message.text or "", "Цена должна быть целым числом.")
+        price = parse_limited_positive_int(
+            message.text or "",
+            "Цена должна быть целым числом от 1 до 100000.",
+            MAX_SERVICE_PRICE,
+        )
     except ValueError as error:
         await message.answer(str(error))
         return
@@ -267,9 +367,10 @@ async def add_service_price(message: Message, state: FSMContext) -> None:
 async def add_service_duration(message: Message, state: FSMContext) -> None:
     """Create service after collecting all fields."""
     try:
-        duration = parse_positive_int(
+        duration = parse_limited_positive_int(
             message.text or "",
-            "Длительность должна быть целым числом.",
+            "Длительность должна быть целым числом от 1 до 720.",
+            MAX_DURATION_MINUTES,
         )
     except ValueError as error:
         await message.answer(str(error))
@@ -349,6 +450,108 @@ async def disable_service(message: Message, state: FSMContext) -> None:
     await message.answer("Услуга отключена.", reply_markup=get_admin_services_menu())
 
 
+@router.message(F.text == "Включить услугу")
+async def start_enable_service(message: Message, state: FSMContext) -> None:
+    """Start service enabling."""
+    if await _deny_non_admin(message):
+        return
+    await state.set_state(EnableService.service_id)
+    await message.answer("Введите id услуги, которую нужно включить.")
+
+
+@router.message(EnableService.service_id)
+async def enable_service(message: Message, state: FSMContext) -> None:
+    """Enable service by id."""
+    try:
+        service_id = parse_positive_int(
+            message.text or "",
+            "Id должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        service = await session.get(Service, service_id)
+        if service is None:
+            await message.answer("Услуга с таким id не найдена.")
+            return
+        service.is_active = True
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Услуга включена.", reply_markup=get_admin_services_menu())
+
+
+@router.message(F.text == "Изменить услугу")
+async def start_edit_service(message: Message, state: FSMContext) -> None:
+    """Start service editing."""
+    if await _deny_non_admin(message):
+        return
+    await state.set_state(EditService.service_id)
+    await message.answer("Введите id услуги, которую нужно изменить.")
+
+
+@router.message(EditService.service_id)
+async def choose_service_for_edit(message: Message, state: FSMContext) -> None:
+    """Save service id for editing."""
+    try:
+        service_id = parse_positive_int(
+            message.text or "",
+            "Id должен быть целым числом.",
+        )
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        service = await session.get(Service, service_id)
+        if service is None:
+            await message.answer("Услуга с таким id не найдена.")
+            return
+
+    await state.update_data(service_id=service_id)
+    await state.set_state(EditService.field)
+    await message.answer("Что изменить?", reply_markup=get_edit_service_menu())
+
+
+@router.message(EditService.field)
+async def choose_service_field(message: Message, state: FSMContext) -> None:
+    """Save service field selected for editing."""
+    try:
+        field = parse_edit_service_field(message.text or "")
+    except ValueError as error:
+        await message.answer(str(error), reply_markup=get_edit_service_menu())
+        return
+
+    await state.update_data(field=field)
+    await state.set_state(EditService.value)
+    await message.answer("Введите новое значение.")
+
+
+@router.message(EditService.value)
+async def update_service_field(message: Message, state: FSMContext) -> None:
+    """Apply service field change."""
+    data = await state.get_data()
+    field = str(data["field"])
+    try:
+        value = _parse_service_edit_value(field, message.text or "")
+    except ValueError as error:
+        await message.answer(str(error))
+        return
+
+    async for session in get_session():
+        service = await session.get(Service, int(data["service_id"]))
+        if service is None:
+            await message.answer("Услуга с таким id не найдена.")
+            return
+        setattr(service, field, value)
+        await session.commit()
+
+    await state.clear()
+    await message.answer("Услуга изменена.", reply_markup=get_admin_services_menu())
+
+
 @router.message(F.text == "Добавить слот")
 async def start_add_slot(message: Message, state: FSMContext) -> None:
     """Start time slot creation."""
@@ -362,7 +565,9 @@ async def start_add_slot(message: Message, state: FSMContext) -> None:
 async def add_slot_start(message: Message, state: FSMContext) -> None:
     """Save slot start datetime."""
     try:
-        start_at = parse_admin_datetime(message.text or "", get_settings().timezone)
+        timezone = get_settings().timezone
+        start_at = parse_admin_datetime(message.text or "", timezone)
+        ensure_future_datetime(start_at, datetime.now(ZoneInfo(timezone)))
     except ValueError as error:
         await message.answer(str(error))
         return
@@ -375,9 +580,10 @@ async def add_slot_start(message: Message, state: FSMContext) -> None:
 async def add_slot_duration(message: Message, state: FSMContext) -> None:
     """Create time slot after collecting all fields."""
     try:
-        duration = parse_positive_int(
+        duration = parse_limited_positive_int(
             message.text or "",
-            "Длительность должна быть целым числом.",
+            "Длительность должна быть целым числом от 1 до 720.",
+            MAX_DURATION_MINUTES,
         )
     except ValueError as error:
         await message.answer(str(error))
@@ -389,8 +595,19 @@ async def add_slot_duration(message: Message, state: FSMContext) -> None:
         await message.answer("Дата должна быть в формате ДД.ММ.ГГГГ ЧЧ:ММ.")
         return
 
-    slot = TimeSlot(start_at=start_at, end_at=start_at + timedelta(minutes=duration))
+    end_at = start_at + timedelta(minutes=duration)
     async for session in get_session():
+        overlapping_slot = await session.scalar(
+            select(TimeSlot).where(
+                TimeSlot.start_at < end_at,
+                TimeSlot.end_at > start_at,
+            ),
+        )
+        if overlapping_slot is not None:
+            await message.answer("Этот слот пересекается с уже добавленным временем.")
+            return
+
+        slot = TimeSlot(start_at=start_at, end_at=end_at)
         session.add(slot)
         await session.commit()
 
@@ -426,6 +643,33 @@ async def list_free_slots(message: Message) -> None:
 
     await message.answer(
         "\n".join(format_slot(slot) for slot in slots),
+        reply_markup=get_admin_schedule_menu(),
+    )
+
+
+@router.message(F.text == "Все слоты")
+async def list_all_slots(message: Message) -> None:
+    """Show all time slots."""
+    if await _deny_non_admin(message):
+        return
+    async for session in get_session():
+        slots = list(
+            (
+                await session.scalars(
+                    select(TimeSlot).order_by(TimeSlot.start_at),
+                )
+            ).all(),
+        )
+
+    if not slots:
+        await message.answer(
+            "Слоты пока не добавлены.",
+            reply_markup=get_admin_schedule_menu(),
+        )
+        return
+
+    await message.answer(
+        "\n".join(format_slot_details(slot) for slot in slots),
         reply_markup=get_admin_schedule_menu(),
     )
 
@@ -600,6 +844,7 @@ async def choose_appointment_for_reschedule(
     await message.answer(
         "Выберите новый слот и отправьте его id:\n\n"
         + "\n".join(format_slot(slot) for slot in slots),
+        reply_markup=get_id_choice_menu(slot.id for slot in slots),
     )
 
 
@@ -667,4 +912,4 @@ async def _send_client_notice(
     """Send appointment notice to client."""
     if message.bot is None:
         return
-    await message.bot.send_message(client_telegram_id, text)
+    await send_message_safely(message.bot, client_telegram_id, text)

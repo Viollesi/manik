@@ -31,6 +31,9 @@ cp .env.example .env
 - `DATABASE_URL` - адрес PostgreSQL;
 - `TIMEZONE` - часовой пояс, например `Europe/Moscow`.
 
+`ADMIN_IDS` должен содержать только числа, например `123456789` или
+`123456789,987654321`.
+
 ## Локальная разработка
 
 ```bash
@@ -63,6 +66,13 @@ docker compose down
 ```bash
 docker compose down -v
 ```
+
+## Продакшен
+
+Для запуска на сервере используйте Docker Compose с заполненным `.env`.
+Контейнер бота при старте применяет миграции, пишет логи в stdout и ждёт
+готовности PostgreSQL через healthcheck. Перед обновлением образа сделайте
+резервную копию PostgreSQL.
 
 ## Миграции
 
